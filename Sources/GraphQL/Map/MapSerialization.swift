@@ -40,6 +40,8 @@ public struct MapSerialization {
             return value as NSObject
         case var .number(number):
             return number.number
+        case let .date(date):
+            return date as NSDate
         case let .string(string):
             return string as NSString
         case let .array(array):
@@ -49,3 +51,4 @@ public struct MapSerialization {
         }
     }
 }
+

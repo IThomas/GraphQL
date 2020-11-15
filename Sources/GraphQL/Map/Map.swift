@@ -1,9 +1,15 @@
-// MARK: MapError
+import Foundation
 
+// MARK: MapError
 public enum MapError : Error {
     case incompatibleType
     case outOfBounds
     case valueNotFound
+    case notMapInitializable(Any.Type)
+    case notMapRepresentable(Any.Type)
+    case notMapDictionaryKeyInitializable(Any.Type)
+    case notMapDictionaryKeyRepresentable(Any.Type)
+    case cannotInitialize(type: Any.Type, from: Any.Type)
 }
 
 // MARK: Map
@@ -15,6 +21,7 @@ public enum Map {
     case string(String)
     case array([Map])
     case dictionary([String: Map])
+    case date(Date)
     
     public static func int(_ value: Int) -> Map {
         return .number(Number(value))
@@ -50,6 +57,10 @@ extension Map {
         self.init(Number(double))
     }
     
+    public init(_ date: Date) {
+        self = .date(Date(timeIntervalSince1970:  date.timeIntervalSince1970))
+    }
+    
     public init(_ string: String) {
         self = .string(string)
     }
@@ -76,6 +87,10 @@ extension Map {
     
     public init(_ double: Double?) {
         self.init(double.map({ Number($0) }))
+    }
+    
+    public init(_ date: Date?) {
+        self =  date.map({Map($0)}) ?? .null
     }
     
     public init(_ string: String?) {
@@ -146,6 +161,8 @@ extension Map {
             self = .bool(bool)
         case let double as Double:
             self = .number(Number(double))
+        case let date as Date:
+            self = .date(Date(timeIntervalSince1970:  date.timeIntervalSince1970))
         case let int as Int:
             self = .number(Number(int))
         case let string as String:
@@ -191,6 +208,13 @@ extension Map {
         return false
     }
 
+    public var isDate: Bool {
+        if case .date = self {
+            return true
+        }
+        return false
+    }
+    
     public var isDictionary: Bool {
         if case .dictionary = self {
             return true
@@ -210,6 +234,8 @@ extension Map {
             return "bool"
         case .number:
             return "number"
+        case .date:
+            return "date"
         case .string:
             return "string"
         case .array:
@@ -224,27 +250,31 @@ extension Map {
 
 extension Map {
     public var bool: Bool? {
-        return try? boolValue()
+        return try? get()
     }
     
     public var int: Int? {
-        return try? intValue()
+        return try? (get() as Number).intValue
     }
 
     public var double: Double? {
-        return try? doubleValue()
+        return try? (get() as Number).doubleValue
     }
 
+    public var date: Date? {
+        return try? get()
+    }
+    
     public var string: String? {
-        return try? stringValue()
+        return try? get()
     }
 
     public var array: [Map]? {
-        return try? arrayValue()
+        return try? get()
     }
 
     public var dictionary: [String: Map]? {
-        return try? dictionaryValue()
+        return try? get()
     }
 }
 
@@ -265,7 +295,11 @@ extension Map {
             
         case let .number(number):
             return number.boolValue
-
+        
+        case let .date(value):
+            return value.timeIntervalSince1970 != 0
+            
+            
         case let .string(value):
             switch value.lowercased() {
             case "true": return true
@@ -283,7 +317,7 @@ extension Map {
 
     public func intValue(converting: Bool = false) throws -> Int {
         guard converting else {
-            return try (get() as Number).intValue
+            return try get()
         }
 
         switch self {
@@ -293,6 +327,9 @@ extension Map {
         case let .number(number):
             return number.intValue
 
+        case let .date(value):
+            return Int(value.timeIntervalSince1970)
+            
         case let .string(value):
             guard let value = Int(value) else {
                 throw MapError.incompatibleType
@@ -307,7 +344,7 @@ extension Map {
 
     public func doubleValue(converting: Bool = false) throws -> Double {
         guard converting else {
-            return try (get() as Number).doubleValue
+            return try get()
         }
 
         switch self {
@@ -317,6 +354,10 @@ extension Map {
         case let .number(number):
             return number.doubleValue
 
+        case let .date(value):
+             return Double(value.timeIntervalSinceReferenceDate)
+            
+            
         case let .string(value):
             guard let value = Double(value) else {
                 throw MapError.incompatibleType
@@ -329,6 +370,75 @@ extension Map {
         }
     }
 
+    public func dateValue(converting: Bool = false) throws -> Date? {
+        guard converting else {
+            return try get()
+        }
+
+        switch self {
+            case .null:
+                return nil
+            /*    case .bool(let value):
+            return value ? 1.0 : 0.0
+
+            case .int(let value):
+            return Double(value)
+
+            case .double(let value):
+            return value
+
+            case .date(let value):
+            return Double(value.timeIntervalSinceReferenceDate)
+            */
+        case let .string(value):
+        
+            if #available(OSX 10.12, *) {
+                let formatter = ISO8601DateFormatter()
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+                if let date = formatter.date(from:  value) {
+                    return date
+                }
+                
+                let formatter2 = DateFormatter()
+                formatter2.calendar = Calendar(identifier: .iso8601)
+                formatter2.locale = Locale(identifier: "en_US_POSIX")
+                formatter2.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter2.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX"
+                
+                
+                if let date = formatter2.date(from: value) {
+                   return date
+                }
+
+                formatter2.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+                if let date = formatter.date(from: value) {
+                    return date
+                }
+                
+                throw MapError.incompatibleType
+
+            } else {
+                let formatter = DateFormatter()
+                formatter.calendar = Calendar(identifier: .iso8601)
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX"
+                if let date = formatter.date(from:  value) {
+                    return date
+                }
+                throw MapError.incompatibleType
+            }
+
+            /*        case .null:
+            return 0
+            */
+        default:
+            throw MapError.incompatibleType
+        }
+    }
+    
     public func stringValue(converting: Bool = false) throws -> String {
         guard converting else {
             return try get()
@@ -344,6 +454,20 @@ extension Map {
         case let .number(number):
             return number.stringValue
 
+        case let .date(value):
+            if #available(OSX 10.12, *) {
+                let formatter = ISO8601DateFormatter()
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                return formatter.string(from: value)
+            } else {
+                let formatter = DateFormatter()
+                formatter.calendar = Calendar(identifier: .iso8601)
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX"
+                return formatter.string(from:  value)
+            }
+            
         case let .string(value):
             return value
 
@@ -398,6 +522,8 @@ extension Map {
             switch self {
             case let .number(value as T):
                 return value
+            case let .date(value as T):
+                 return value
             case let .bool(value as T):
                 return value
             case let .string(value as T):
@@ -610,6 +736,10 @@ extension Map : Codable {
             self = .number(Number(double))
         }
             
+        else if let date = try? container.decode(Date.self) {
+                self  = .date(Date(timeIntervalSince1970: date.timeIntervalSince1970))
+        }
+        
         else if let string = try? container.decode(String.self) {
             self = .string(string)
         }
@@ -637,6 +767,8 @@ extension Map : Codable {
             try container.encode(value)
         case let .number(number):
             try container.encode(number.doubleValue)
+        case let .date(date):
+             try container.encode(date)
         case let .string(string):
             try container.encode(string)
         case let .array(array):
@@ -658,6 +790,8 @@ public func == (lhs: Map, rhs: Map) -> Bool {
         return true
     case let (.number(l), .number(r)) where l == r:
         return true
+    case let (.date(l), .date(r)) where l == r:
+          return true
     case let (.string(l), .string(r)) where l == r:
         return true
     case let (.array(l), .array(r)) where l == r:
@@ -680,6 +814,8 @@ extension Map : Hashable {
             hasher.combine(value)
         case let .number(number):
             hasher.combine(number)
+        case let .date(date):
+            hasher.combine(date)
         case let .string(string):
             hasher.combine(string)
         case let .array(array):
@@ -709,6 +845,31 @@ extension Map : ExpressibleByIntegerLiteral {
         self = .number(Number(value))
     }
 }
+
+extension Date: ExpressibleByStringLiteral {
+    public init(stringLiteral value: String) {
+        if #available(OSX 10.12, *) {
+            let formatter = ISO8601DateFormatter()
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            self = formatter.date(from: value)!
+        } else {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .iso8601)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX"
+            self = formatter.date(from:  value)!
+        }
+    }
+    public init(extendedGraphemeClusterLiteral value: String) {
+        self.init(stringLiteral: value)
+    }
+    public init(unicodeScalarLiteral value: String) {
+        self.init(stringLiteral: value)
+    }
+
+}
+
 
 extension Map : ExpressibleByFloatLiteral {
     public init(floatLiteral value: FloatLiteralType) {
@@ -806,6 +967,19 @@ extension Map {
                 return value.description
             case let .number(number):
                 return number.description
+            case let .date(date):
+                if #available(OSX 10.12, *) {
+                    let formatter = ISO8601DateFormatter()
+                    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                    return formatter.string(from: date)
+                } else {
+                    let formatter = DateFormatter()
+                    formatter.calendar = Calendar(identifier: .iso8601)
+                    formatter.locale = Locale(identifier: "en_US_POSIX")
+                    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX"
+                    return formatter.string(from: date)
+                }
             case let .string(string):
                 return escape(string)
             case let .array(array):
@@ -890,3 +1064,4 @@ extension Map {
         return serialize(map: self)
     }
 }
+
